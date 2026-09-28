@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>The Little 3D Engine That Could</title>
+
+		<link rel="preconnect" href="https://fonts.googleapis.com">
+		<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+
+		<style>
+
+			body {
+				background: black;
+				color: #30E030; /* Green */
+				font-family: "VT323", monospace, monospace, sans-serif;
+				text-align: center;	
+			}
+			canvas {
+				position: absolute;
+				width: 1000px;
+				height: 1000px;
+				top: 235px;
+				left: 235px;
+				z-index: 0;
+			}
+			#monitorFrame {
+				position: absolute;
+				display: block;
+				width: 1450px;
+				height: 1450px;
+				z-index: 100;
+				background: url("monitorFrame.png");
+			}
+
+		</style>
+	</head>
+
+<body>
+	<center>
+	<div id="monitorFrame"></div>
+	<canvas id="canvas" width="1000" height="1000" tabindex="0"></canvas>
+	</center>
+
+</body>
+
+</html>
+
+<script> 
+
+
+/*
+
+TO DO:
+
+Z translation
+Rotation by axis rotation
+Depth sorting
+Line clipping
+Remove hidden edges
+Draw faces
+Backface culling
+
+*/
+
+// Get the canvas element and its 2D context
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const greenColor = "#30E030"; // Primary bright green
+const darkGreenColor = "#051505"; // Dark greenish gray (background)
+const gridStrokeColor = "#012010"; // Extra dark green
+const axesColor = "#103510"; // Medium dark green
+
+const strokeSize = 2; // Line thickness
+const gridStrokeSize = 1; // Line thickness
+const axesSize = 2; // Line thickness in pixels
+const gridSize = 50; // 1 unit = how many pixels
+
+let isDragging = false;
+let dragStartMouseWorld = null;
+let dragStartTranslation = null;
+let lastMouseWorld = null;
+
+canvas.width  = 1000; // Already set in HTML
+canvas.height = 1000; // Already set in HTML
+
+ctx.fillStyle = darkGreenColor;
+ctx.fillRect(0, 0, canvas.width, canvas.height); // Background
+
+// View Settings
+let showGrid = true;
+let showAxes = true;
+let showAxesLabels = true;
+let showPoints = true;
+let showLines = true;
+let	showCoords = false;
+let showPointIndex = false;
+let showWorldCoords = true;
+let showHud = true;
+let orthoMode = false;
+
+
+// Master object translation offset
+let translation = {
+	x: 0,
+	y: 0,
+	z: 4
+}
+
+let rotation = {
+	x: 0,
+	y: 0,
+	z: 0
+}
+
+// Define our collection of points
+// x, y z
+const points = [
+	// Front face
+	{ x: -1, y:  1, z:  1 }, // 0
+	{ x:  1, y:  1, z:  1 }, // 1
+	{ x:  1, y: -1, z:  1 }, // 2
+	{ x: -1, y: -1, z:  1 }, // 3
+
+	// Back face
+	{ x: -1, y:  1, z: -1 }, // 4
+	{ x:  1, y:  1, z: -1 }, // 5
+	{ x:  1, y: -1, z: -1 }, // 6
+	{ x: -1, y: -1, z: -1 }  // 7
+];
+
+// Define our collection of lines
+// Connecting one point index to another
+const lines = [
+	// Front
+	{ a: 0, b: 1 },
+	{ a: 1, b: 2 },
+	{ a: 2, b: 3 },
+	{ a: 3, b: 0 },
+	// Back
+	{ a: 4, b: 5 },
+	{ a: 5, b: 6 },
+	{ a: 6, b: 7 },
+	{ a: 7, b: 4 },
+	// Sides
+	{ a: 0, b: 4 },
+	{ a: 1, b: 5 },
+	{ a: 2, b: 6 },
+	{ a: 3, b: 7 }
+];
+
+// Define camera parameters
+const camera = {
+	x: 0,
+	y: 0,
+	z: 10, // 0 looks like ortho
+	fov: 10
+};
+
+function projectPoint(point) {
+
+	// If 2D point without Z value, draw it at 0 depth
+	// We don't use point.z direclty in case it doesn't have one
+	let z = point.z ?? 	0.0001;
+	// Avoid zero, only for the simple perspective can be 0 otherwise;
+
+	// In orthographic mode, simply return the unmodified point
+	if (orthoMode) return { x: point.x, y: point.y };
+	// Otherwise, calculate perspective
+
+	// Super simple perspective:
+	// xPerspective = x/z;
+	// yPerspective = y/z;
+	
+	xProjected = point.x / z;
+	yProjected = point.y / z;
+
+	return {
+		x: xProjected,
+		y: yProjected,
+		z: z
+	};
+/*
+	// We don't use this because it assumes
+	// camera at origin, right handed space,
+	// And can break with divide by zero, etc
+
+	// Position relative to camera
+	// All camera math stays in this function
+	const dx = point.x - camera.x;
+	const dy = point.y - camera.y;
+	const dz = camera.z -z;
+
+	// Prevent divide-by-zero or inversion
+	if (dz <= 0.01) return null;
+
+	// Perspective (or ortho for now)
+	const scale = camera.fov / dz;
+
+	return {
+		x: dx * scale,
+		y: dy * scale,
+		z: dz // Used for depth sorting, culling, etc
+	};
+*/
+}
+
+// Convert cartesian space units to canvas pixels
+// Shift origin from top left to center
+// Flip the Y axis
+function toScreenSpace(point) {
+	return {
+		x: point.x * gridSize + canvas.width / 2,
+		y: -point.y * gridSize + canvas.height / 2
+	};
+}
+
+function toWorldSpace(screenPoint) {
+	return {
+		x: (screenPoint.x - canvas.width / 2) / gridSize,
+		y: (canvas.height / 2 - screenPoint.y) / gridSize
+	};
+}
+
+
+function translatePoint(point, translation) {
+	return {
+		x: point.x + translation.x,
+		y: point.y + translation.y,
+		z: (point.z ?? 0) + translation.z // If there is a Z
+	};
+}
+
+function transformPoint(point) {
+	// 1. Object 2.   Rotated 3.   World   4. Projected
+	const rotated = rotatePoint(point, rotation);
+	const world = translatePoint(rotated, translation);
+	return projectPoint(world);
+}
+
+// Rotate the points round the X axis
+function rotateX(point, angle) {
+	const cos = Math.cos(angle);
+	const sin = Math.sin(angle);
+	return {
+		x: point.x,
+		y: point.y * cos - point.z * sin,
+		z: point.y * sin + point.z * cos
+	};
+}
+
+// Rotate the points round the Y axis
+function rotateY(point, angle) {
+	const cos = Math.cos(angle);
+	const sin = Math.sin(angle);
+	return {
+		x:  point.x * cos + point.z * sin,
+		y:  point.y,
+		z: -point.x * sin + point.z * cos
+	};
+}
+
+// Rotate the points round the Z axis
+function rotateZ(point, angle) {
+	const cos = Math.cos(angle);
+	const sin = Math.sin(angle);
+	return {
+		x: point.x * cos - point.y * sin,
+		y: point.x * sin + point.y * cos,
+		z: point.z
+	};
+}
+
+// Combine rotation of all axes
+function rotatePoint(point, rot) {
+	let r = point;
+	r = rotateX(r, rot.x);
+	r = rotateY(r, rot.y);
+	r = rotateZ(r, rot.z);
+	return r;
+}
+
+
+function drawPoint(point, pointIndex) {
+
+	// pointIndex is passed from the forEach to draw the text label
+
+	const worldPoint = point; // already transformed
+
+	// Convert cartesion space units to canvas pixels
+	let x = toScreenSpace(worldPoint).x;
+	let y = toScreenSpace(worldPoint).y;
+
+	const dotSize = 4;
+	const dotColor = greenColor; // Green
+
+	ctx.beginPath();
+
+	// X position, Y position, X radius, y radius, rotation, start angle, end angle
+	ctx.ellipse(x, y, dotSize, dotSize, 0, 0, Math.PI * 2); // Angle in radians
+
+	ctx.fillStyle = dotColor;
+	ctx.fill();
+
+	if(showPointIndex) {
+		let xOffset = 6;
+		let yOffset = 20;
+		
+		// Set font
+		ctx.font = "24px VT323";
+
+		// Set text color
+		ctx.fillStyle = greenColor;
+
+		// Draw our point index text
+		ctx.fillText(pointIndex, x + xOffset, y + yOffset);
+	}
+
+	if(showCoords) {
+		let xOffset = 8;
+		let yOffset = -8;
+		
+		// Set font
+		ctx.font = "14px VT323";
+
+		// Set text color
+		ctx.fillStyle = greenColor;
+
+		if (showWorldCoords) {
+			// Draw our coordinate text in world space
+			ctx.fillText(
+				"[" +
+				Math.round(worldPoint.x * 10) / 10 +
+				", " +
+				Math.round(worldPoint.y * 10) / 10 +
+				"]",
+				x + xOffset,
+				y + yOffset
+			);
+		} else {
+			// Draw our coordinate text in local space
+			ctx.fillText(
+				"[" + Math.round(point.x * 10)/10 +
+				", " + Math.round(point.y * 10)/10 + "]",
+				x + xOffset,
+				y + yOffset);
+		}
+	}
+}
+
+function drawLine(pointA, pointB) {
+
+	// Point is already translated and projected
+
+	const a = toScreenSpace(pointA);
+	const b = toScreenSpace(pointB);
+
+	ctx.strokeStyle = greenColor;
+	ctx.lineWidth = strokeSize;
+
+	ctx.beginPath();
+
+	// Go to the first point
+	ctx.moveTo(a.x, a.y);
+	// Draw a line ot the second point
+	ctx.lineTo(b.x, b.y);
+	// Make the line visible by adding a stroke
+	ctx.stroke();
+}
+
+// Draw a reference grid
+function drawGrid() {
+
+	// Define our parameters
+	const blockWidth = gridSize; // Width of each grid square in pixels
+	const blockHeight = gridSize; // Height of each grid square in pixels
+
+	// Set the style of our context before drawing
+	ctx.strokeStyle = gridStrokeColor; 
+	ctx.lineWidth = gridStrokeSize;
+
+	// Draw the vertical lines
+	for (let x = 0; x <= canvas.width; x += blockWidth) {
+		ctx.beginPath();
+		ctx.moveTo(x, 0);
+		ctx.lineTo(x, canvas.height);
+		ctx.stroke();
+	}
+
+	// Draw the horizontal lines
+	for (let y = 0; y <= canvas.height; y += blockHeight) {
+		ctx.beginPath();
+		ctx.moveTo(0, y);
+		ctx.lineTo(canvas.width, y);
+		ctx.stroke();
+	}
+
+	if (showAxes) {
+		ctx.save(); // Save our last drawing settings
+
+		ctx.lineWidth = axesSize;
+		ctx.strokeStyle = axesColor; 
+
+		// Horizontal
+		ctx.beginPath();
+		ctx.moveTo(canvas.height/2, 0);
+		ctx.lineTo(canvas.height/2, canvas.width);
+		ctx.stroke();
+
+		// Vertical
+		ctx.beginPath();
+		ctx.moveTo(0, canvas.width/2);
+		ctx.lineTo(canvas.height, canvas.width/2);
+		ctx.stroke();
+
+		ctx.restore(); // Go back to our previous settings
+	}
+
+	if (showAxesLabels) {
+
+		// Set font
+		ctx.font = "26px VT323";
+
+		// Set text color
+		ctx.fillStyle = axesColor;
+
+		// Draw the axis labels
+		// Arbitrary text offset by eye
+		ctx.fillText("-X", 0+8, canvas.height/2 - 5); 
+		ctx.fillText("+X", canvas.width-32, canvas.height/2 - 5);
+		ctx.fillText("+Y", canvas.width/2 + 5, 0+24); // Text size offset
+		ctx.fillText("-Y", canvas.width/2 + 5, canvas.height - 12); ctx// Text size offset
+	}
+}
+
+function drawHud() {
+
+	ctx.font = "22px VT323";
+	ctx.fillStyle = greenColor;
+
+	const text =
+		"[G]rid   " +
+		"a[X]es   " +
+		"[A]xis Labels   " +
+		"[C]oordinates   " +
+		"[W]orld Space   " +
+		"[P]oints   " +
+		"[L]ines   " +
+		"[I]ndices   " +
+		"[H]UD";
+
+	ctx.fillText(text, 38, canvas.height - 50);
+}
+
+// Keyboard controls
+window.addEventListener("keydown", (event) => {
+
+	// Keypress moves .1 unit, if shift is pressed, move 1 whole unit
+	const unit = event.shiftKey ? 1 : 0.1;
+	const rotationUnit = event.shiftKey ? 0.1 : 0.02;
+
+	// Prevent default browser scrolling
+	event.preventDefault();
+
+	switch (event.key) {
+
+		// Translation Keys
+		case "ArrowUp":
+			if (event.metaKey) {
+				translation.z += unit; // Command key for farther Z depth
+			} else {
+				translation.y += unit;
+			}
+			break;
+		case "ArrowDown":
+			if (event.metaKey) {
+				translation.z -= unit; // Command key for closer Z depth
+			} else {
+				translation.y -= unit;
+			}
+			break;
+		case "ArrowLeft":
+			translation.x -= unit;
+			break;
+		case "ArrowRight":
+			translation.x += unit;
+			break;
+
+		// Rotation Keys
+		case "q":
+			rotation.z += rotationUnit;
+			break;
+		case "e":
+			rotation.z -= rotationUnit;
+			break;
+		case "w":
+			rotation.x += rotationUnit;
+			break;
+		case "s":
+			rotation.x -= rotationUnit;
+			break;
+		case "a":
+			rotation.y += rotationUnit;
+			break;
+		case "d":
+			rotation.y -= rotationUnit;
+			break;
+
+		case "Home":
+			translation.x = 0;
+			translation.y = 0;
+			translation.z = 1;
+			rotation.x = 0;
+			rotation.y = 0;
+			rotation.z = 0;
+			break;
+
+		// Toggle Options
+		case "g":
+			showGrid = !showGrid;
+			break;
+		case "x":
+			showAxes = !showAxes;
+			showAxesLabels = !showAxesLabels;
+			break;
+		case "c":
+			showCoords = !showCoords;
+			break;
+		case "w":
+			showWorldCoords = !showWorldCoords;
+			break;
+		case "p":
+			showPoints = !showPoints;
+			break;
+		case "l":
+			showLines = !showLines;
+			break;
+		case "i":
+			showPointIndex = !showPointIndex;
+			break;
+		case "h":
+			showHud = !showHud;
+			break;
+		case "h":
+			orthoMode = !orthoMode;
+
+
+		case "Home":
+			translation.x = 0;
+			translation.y = 0;
+			translation.z = 0;
+			// rotation.x = 0;
+			// rotation.y = 0;
+			// rotation.z = 0;
+			break;
+	}
+});
+
+
+// Mouse movement
+
+function getMouseScreenPos(event) {
+	const rect = canvas.getBoundingClientRect();
+	return {
+		x: event.clientX - rect.left,
+		y: event.clientY - rect.top
+	};
+}
+
+canvas.addEventListener("mousedown", (event) => {
+	isDragging = true;
+
+	const mouseScreen = getMouseScreenPos(event);
+	const mouseWorld = toWorldSpace(mouseScreen);
+
+	dragStartMouseWorld = mouseWorld;
+	dragStartTranslation = { ...translation };
+});
+
+canvas.addEventListener("mousemove", (event) => {
+	if (!isDragging) return;
+
+	const mouseScreen = getMouseScreenPos(event);
+	const mouseWorld = toWorldSpace(mouseScreen);
+
+	const dx = mouseWorld.x - dragStartMouseWorld.x;
+	const dy = mouseWorld.y - dragStartMouseWorld.y;
+
+	translation.x = dragStartTranslation.x + dx;
+	translation.y = dragStartTranslation.y + dy;
+});
+
+window.addEventListener("mouseup", () => {
+	isDragging = false;
+});
+
+// ===================
+// MAIN ANIMATION LOOP
+// ===================
+function loop() {
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+	if (showGrid) {
+		drawGrid();
+	}
+
+	if (showPoints) {
+
+		points.forEach((p, i) => {
+
+			// 3D world space to projected 2D space
+			const projected = transformPoint(p);
+			if (!projected) return;
+
+			// 2D unit space to 2D screen space
+			drawPoint(projected, i);
+		});
+	}
+
+	if (showLines) {
+		lines.forEach(l => {
+
+			const pointA = points[l.a];
+			const pointB = points[l.b];
+
+			if (!pointA || !pointB) return;
+
+			// 3D world space to projected 2D space
+			const projectedA = transformPoint(pointA);
+			const projectedB = transformPoint(pointB);
+
+			if (!projectedA || !projectedB) return;
+
+			// 2D unit space to 2D screen space
+			drawLine(projectedA, projectedB);
+		});
+	}
+
+	if (showHud) {
+		drawHud();
+	}
+
+	requestAnimationFrame(loop);
+}
+
+// Call the loop
+loop();
+
+</script>

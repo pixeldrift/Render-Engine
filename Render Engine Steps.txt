@@ -1,0 +1,107 @@
+Basic 3D Render Engine
+
+Start with Cartesian coordinate plane
+
+Draw a point in 2D
+
+Adjust coordinate space to javasript coordinate system
+- Shift to positive quadrant
+- Convert coordinates to pixels based on a grid size
+
+Draw a point
+
+Copy the point
+Shift the X coordinates
+
+Draw a line from point A to point B
+We now have a line
+
+Make a point collection
+Make a line collection
+
+Draw all the points
+Draw all the connecting lines
+
+Translate the points in 2D
+- Translate X
+- Translate Y
+
+Animate the translation
+- Set a timer interval
+- Set a framerate
+- Set a duration
+- Create a draw loop
+- Call the loop
+- Make boomerang/pingpong (using flip)
+
+Add Z coordinate to points
+
+Add Perspective:
+xPerspective = x/z;
+yPerspective = y/z;
+
+Draw 3D Grid?
+
+Go back to 1 point
+Translate in Z
+
+Add a second point
+Translate in Z
+
+4 points
+Translate in Z
+
+Duplicate points
+Shift Z coordinate of point definition
+
+Translate in Z
+Translate X and Y
+
+Draw lines for first 4 points and second 4 points
+We now have 2 planes, faces
+
+Draw lines from corners of first plane to second plane
+We now have a cube
+Translate XYZ
+
+Rotate point in space around center
+Hard to grasp
+Show view from top to illustrate
+
+
+Add second point and connect with a line
+Hard to see front on
+Show top view
+Rotate the line
+
+Show 4 points
+Rotate the points
+Connect the points with lines
+Rotate the Face
+
+Show all points
+Rotate the points
+Connect all points
+Rotate the cube
+
+Rotate and translate the cube in 3D
+
+Show Catumul hand
+
+Show Tron Recognizer
+https://www.youtube.com/watch?v=Tm4i6D3XXBQ
+
+
+MAGI, Tripple I
+3D car
+Drafting pen vectorscope
+digitizer
+
+Tripple I Demo Real
+https://www.youtube.com/watch?v=ADF3-6owY0A
+
+Axis aligned rotation
+Depth sorting
+Backface culling
+
+*/
